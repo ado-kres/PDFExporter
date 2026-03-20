@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
-<title>PDF Annotator (Mobile‑friendly, Pan/Pinch Zoom, Fixed Toolbar)</title>
+<title>PDF Annotator (Mobile, Pan/Zoom, Text Move Handle, Text Erase)</title>
 <style>
   :root { color-scheme: light dark; --toolbar-bg:#ffffff; --border:#e6e6e6; --shadow:0 2px 16px rgba(0,0,0,.06); }
   html, body { height: 100%; }
@@ -19,12 +19,10 @@
   /* ---- Stage under toolbar ---- */
   #viewport {
     position: absolute; left: 0; right: 0; bottom: 0;
+    overflow: hidden; background: #f7f7f7; touch-action: none;
     /* top is set dynamically to toolbar height */
-    overflow: hidden;
-    background: #f7f7f7;
-    /* We toggle this in JS depending on tool; default "none" keeps page steady while drawing */
-    touch-action: none;
   }
+
   /* Pan/zoom container */
   #content { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
   #pages { padding: 14px; display: grid; gap: 22px; justify-content: center; }
@@ -34,9 +32,12 @@
   /* Overlay layers */
   .ink-canvas { position: absolute; inset: 0; cursor: crosshair; touch-action: none; z-index: 1; }
   .text-layer {
-    position: absolute; inset: 0; z-index: 2; pointer-events: none; /* enabled in JS for Text tool */
-    user-select: text; -webkit-user-select: text; /* allow caret/selection */
+    position: absolute; inset: 0; z-index: 2;
+    pointer-events: none;           /* enabled in JS for Text tool */
+    user-select: text; -webkit-user-select: text;
   }
+  .text-layer.text-mode .text-handle { display: flex; }  /* show handles only in Text tool */
+
   .text-item {
     position: absolute; min-width: 8px;
     white-space: pre-wrap; background: transparent; color: black;
@@ -46,6 +47,16 @@
   .text-item:focus {
     outline: 1px dashed #8bb;      /* show only while editing */
     background: #f7faff;
+  }
+  /* Small move handle inside each text box */
+  .text-handle {
+    position: absolute; left: -12px; top: -12px;
+    width: 18px; height: 18px; border-radius: 50%;
+    border: 1px solid #bbb; background: #fff; color: #444;
+    font-size: 12px; line-height: 18px; text-align: center;
+    box-shadow: 0 1px 4px rgba(0,0,0,.12);
+    cursor: move; display: none; z-index: 3;
+    user-select: none; -webkit-user-select: none;
   }
 
   /* ---- Controls ---- */
@@ -90,7 +101,7 @@
     <button id="tool-pen" class="tool-btn active" title="Draw (Apple Pencil / mouse)">
       <span class="icon">✏️</span><span class="txt">Draw</span>
     </button>
-    <button id="tool-eraser" class="tool-btn" title="Erase strokes">
+    <button id="tool-eraser" class="tool-btn" title="Erase strokes & text">
       <span class="icon">🧽</span><span class="txt">Eraser</span>
     </button>
     <button id="tool-hand" class="tool-btn" title="Move / pan / pinch‑zoom">
@@ -186,6 +197,7 @@
     const pageData = [];   // per page: {strokes, texts, viewportWidth, viewportHeight}
     const pageLayers = []; // per page: {wrap, pdfCanvas, inkCanvas, textLayer}
 
+    /************ View (pan/zoom) ************/
     const content = document.getElementById('content');
     const view = { scale: 1, min: 0.5, max: 3, tx: 0, ty: 0 };
     function applyView(){
@@ -240,7 +252,6 @@
         sizeMenu.appendChild(row);
       });
       sizeLabel.textContent = `Size: ${brushSize}`;
-      // Make the whole button clickable (icon+text)
       sizeBtn.addEventListener('click', (e)=>{ e.stopPropagation(); sizeMenu.classList.toggle('open'); });
       document.addEventListener('click', (e)=>{ if (!sizeMenu.contains(e.target) && !sizeBtn.contains(e.target)) sizeMenu.classList.remove('open'); });
     })();
@@ -255,8 +266,10 @@
 
       pageLayers.forEach(l => {
         if (!l) return;
-        // Text layer hit testing only in text mode
+        // Text layer hit testing and handle visibility only in text mode
         l.textLayer.style.pointerEvents = (tool==='text') ? 'auto' : 'none';
+        l.textLayer.classList.toggle('text-mode', tool==='text');
+
         // Cursor
         if (tool === 'eraser') { l.inkCanvas.classList.remove('hand-grab','hand-grabbing'); l.inkCanvas.style.cursor = 'cell'; }
         else if (tool === 'hand') { l.inkCanvas.classList.add('hand-grab'); l.inkCanvas.style.cursor = 'grab'; }
@@ -284,7 +297,7 @@
         pdfBytesOriginal = await file.arrayBuffer();
         await loadPDF(pdfBytesOriginal);
 
-        // Ensure layout is ready before fitting
+        // Ensure layout is ready before fitting (prevents disappearance)
         setTimeout(centerAndFitToWidth, 60);
       } catch (err) { console.error(err); alert('Failed to load PDF. See console.'); }
     });
@@ -315,7 +328,7 @@
         pagesEl.appendChild(wrap);
       }
 
-      // Size the transform container AFTER layout fully settles (prevents disappearing)
+      // Size the transform container AFTER layout fully settles
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           content.style.width  = Math.max(pagesEl.scrollWidth,  pagesEl.getBoundingClientRect().width)  + 'px';
@@ -355,7 +368,7 @@
                  pressure: e.pressure && e.pressure > 0 ? e.pressure : 1.0 };
       }
 
-      // Pen & Eraser on overlay
+      // ----- Pen & Eraser on overlay -----
       inkCanvas.addEventListener('pointerdown', (e) => {
         if (currentTool === 'pen') {
           inkCanvas.setPointerCapture(e.pointerId); drawing = true;
@@ -363,7 +376,10 @@
           currentStroke.points.push(getPosOnCanvas(e, inkCanvas)); e.preventDefault();
         } else if (currentTool === 'eraser') {
           inkCanvas.setPointerCapture(e.pointerId);
-          eraseAt(getPosOnCanvas(e, inkCanvas), brushSize*2); e.preventDefault();
+          const pos = getPosOnCanvas(e, inkCanvas);
+          eraseAt(pos, brushSize*2);
+          eraseTextAt(pos, brushSize*2);     // <--- NEW: erase text fields
+          e.preventDefault();
         }
       });
       inkCanvas.addEventListener('pointermove', (e) => {
@@ -371,7 +387,10 @@
           currentStroke.points.push(getPosOnCanvas(e, inkCanvas));
           const last = currentStroke.points.slice(-2); drawStroke(ctx, { ...currentStroke, points: last }); e.preventDefault();
         } else if (currentTool === 'eraser' && e.pressure !== 0) {
-          eraseAt(getPosOnCanvas(e, inkCanvas), brushSize*2); e.preventDefault();
+          const pos = getPosOnCanvas(e, inkCanvas);
+          eraseAt(pos, brushSize*2);
+          eraseTextAt(pos, brushSize*2);     // <--- NEW: erase text fields while moving
+          e.preventDefault();
         }
       });
       function endStroke(e) {
@@ -384,7 +403,7 @@
       inkCanvas.addEventListener('pointercancel', endStroke);
       inkCanvas.addEventListener('pointerleave', () => { if (drawing) endStroke(new PointerEvent('pointerup')); });
 
-      // Eraser helpers
+      // Stroke-eraser
       function eraseAt(pos, radius){
         const strokes = pageData[pageIndex].strokes; let removed = false;
         for (let s = strokes.length - 1; s >= 0; s--) { if (strokeIntersectsCircle(strokes[s], pos, radius)) { strokes.splice(s,1); removed = true; } }
@@ -405,24 +424,20 @@
         const t = c1 / c2; const px = a.x + t*vx, py = a.y + t*vy; return Math.hypot(p.x-px, p.y-py);
       }
 
-      // ===== Text tool helpers =====
+      // ===== Text: create, edit, move with handle, erase by eraser =====
       function focusTextItem(el) {
         el.contentEditable = (currentTool === 'text') ? 'true' : 'false';
         if (currentTool !== 'text') return;
         setTimeout(() => {
           try {
             el.focus({ preventScroll: true });
-            const r = document.createRange();
-            r.selectNodeContents(el);
-            r.collapse(false);
-            const sel = window.getSelection();
-            sel.removeAllRanges();
-            sel.addRange(r);
+            const r = document.createRange(); r.selectNodeContents(el); r.collapse(false);
+            const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
           } catch {}
         }, 0);
       }
 
-      // Delegated click: edit existing or create a new text box
+      // Create NEW text at click when in Text tool; edit existing otherwise.
       textLayer.addEventListener('click', (e) => {
         if (currentTool !== 'text') return;
 
@@ -433,7 +448,6 @@
           return;
         }
 
-        // create new text item at click
         const rect = textLayer.getBoundingClientRect();
         const x = (e.clientX - rect.left) * (inkCanvas.width  / rect.width);
         const y = (e.clientY - rect.top)  * (inkCanvas.height / rect.height);
@@ -450,17 +464,26 @@
         el.style.lineHeight = '1.2';
         el.style.pointerEvents = 'auto';
         el.textContent = '';
+
+        // Add little move handle
+        const handle = document.createElement('div');
+        handle.className = 'text-handle';
+        handle.title = 'Move';
+        handle.textContent = '⠿';
+        el.appendChild(handle);
+
         textLayer.appendChild(el);
 
         // Model
         const item = { x, y, color: currentColor, size: textSize, value: '' };
+        el._model = item; // link DOM -> model
         pageData[pageIndex].texts.push(item);
 
         focusTextItem(el);
 
         function commit(){
-          item.value = el.textContent || '';
-          if (item.value.trim() === '') {
+          item.value = el.textContent.replace('⠿','').trim() || el.textContent; // keep value only (handle text is separate node)
+          if ((item.value || '').trim() === '') {
             const idx = pageData[pageIndex].texts.indexOf(item);
             if (idx>=0) pageData[pageIndex].texts.splice(idx,1);
             el.remove();
@@ -476,16 +499,98 @@
         el.addEventListener('keydown', onKey);
       });
 
-      // Update editability when tools change
+      // Re‑enter edit mode for existing text (tap with Text tool)
       document.addEventListener('tool-change', () => {
         textLayer.querySelectorAll('.text-item').forEach(el => {
           el.contentEditable = (currentTool === 'text') ? 'true' : 'false';
         });
       });
 
-      // Toolbar actions (current page)
-      undoBtn.addEventListener('click', () => { if (pageData[pageIndex].strokes.length > 0) { pageData[pageIndex].strokes.pop(); redraw(); } });
-      clearBtn.addEventListener('click', () => { pageData[pageIndex].strokes = []; pageData[pageIndex].texts = []; textLayer.innerHTML = ''; redraw(); });
+      // ---- Move text by dragging its handle (only visible in Text tool) ----
+      let dragText = null;
+      let dragStart = null; // {clientX, clientY, x0, y0, scaleX, scaleY}
+      textLayer.addEventListener('pointerdown', (e) => {
+        if (currentTool !== 'text') return;
+        const handle = e.target.closest('.text-handle');
+        if (!handle) return;
+
+        const el = handle.parentElement; // .text-item
+        // prevent selecting text
+        el.contentEditable = 'false';
+
+        const layerRect = textLayer.getBoundingClientRect();
+        const scaleX = inkCanvas.width  / layerRect.width;
+        const scaleY = inkCanvas.height / layerRect.height;
+
+        dragText = el;
+        dragStart = {
+          clientX: e.clientX, clientY: e.clientY,
+          x0: parseFloat(el.style.left) || 0,
+          y0: parseFloat(el.style.top)  || 0,
+          scaleX, scaleY
+        };
+        textLayer.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        e.stopPropagation();
+      });
+      textLayer.addEventListener('pointermove', (e) => {
+        if (!dragText) return;
+        const dx = (e.clientX - dragStart.clientX) * dragStart.scaleX;
+        const dy = (e.clientY - dragStart.clientY) * dragStart.scaleY;
+        const nx = dragStart.x0 + dx;
+        const ny = dragStart.y0 + dy;
+        dragText.style.left = nx + 'px';
+        dragText.style.top  = ny + 'px';
+        if (dragText._model) { dragText._model.x = nx; dragText._model.y = ny; }
+        e.preventDefault();
+      });
+      function endDrag(e){
+        if (!dragText) return;
+        // restore editability depending on tool
+        dragText.contentEditable = (currentTool === 'text') ? 'true' : 'false';
+        dragText = null; dragStart = null;
+        try { textLayer.releasePointerCapture(e.pointerId); } catch {}
+      }
+      textLayer.addEventListener('pointerup', endDrag);
+      textLayer.addEventListener('pointercancel', endDrag);
+      textLayer.addEventListener('pointerleave', endDrag);
+
+      // ---- Erase text items when eraser touches them ----
+      function eraseTextAt(posCanvas, radius){
+        // Convert text items' DOM rects to canvas-space and test circle-rect distance
+        const layerRect = textLayer.getBoundingClientRect();
+        const scaleX = inkCanvas.width  / layerRect.width;
+        const scaleY = inkCanvas.height / layerRect.height;
+
+        // Use reverse order (top-most first) like we did for strokes
+        const items = Array.from(textLayer.querySelectorAll('.text-item'));
+        let removedAny = false;
+        for (let i = items.length - 1; i >= 0; i--) {
+          const el = items[i];
+          const r = el.getBoundingClientRect();
+          const left   = (r.left - layerRect.left) * scaleX;
+          const top    = (r.top  - layerRect.top ) * scaleY;
+          const width  = r.width  * scaleX;
+          const height = r.height * scaleY;
+
+          // Distance from point to rectangle
+          const dx = Math.max(left - posCanvas.x, 0, posCanvas.x - (left + width));
+          const dy = Math.max(top  - posCanvas.y, 0, posCanvas.y - (top + height));
+          const dist = Math.hypot(dx, dy);
+
+          if (dist <= radius) {
+            // Remove DOM and model
+            const model = el._model;
+            if (model) {
+              const idx = pageData[pageIndex].texts.indexOf(model);
+              if (idx >= 0) pageData[pageIndex].texts.splice(idx, 1);
+            }
+            el.remove();
+            removedAny = true;
+          }
+        }
+        return removedAny;
+      }
     }
 
     /************ Pan & Pinch‑Zoom on content (Move tool) ************/
@@ -597,3 +702,4 @@
   </script>
 </body>
 </html>
+``
