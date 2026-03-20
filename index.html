@@ -8,12 +8,14 @@
   :root { color-scheme: light dark; --toolbar-bg:#ffffff; --border:#e6e6e6; --shadow:0 2px 16px rgba(0,0,0,.06); }
   html, body { height: 100%; }
   body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #f7f7f7; overscroll-behavior: none; }
+
   /* ---- Toolbar ---- */
   #toolbar {
     position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
     background: var(--toolbar-bg); border-bottom: 1px solid var(--border); box-shadow: var(--shadow);
     padding: 8px 10px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
   }
+
   /* ---- Stage under toolbar ---- */
   #viewport {
     position: absolute; left: 0; right: 0; bottom: 0;
@@ -23,21 +25,28 @@
     /* We toggle this in JS depending on tool; default "none" keeps page steady while drawing */
     touch-action: none;
   }
+  /* Pan/zoom container */
   #content { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
   #pages { padding: 14px; display: grid; gap: 22px; justify-content: center; }
   .page-wrap { position: relative; display: inline-block; background: #fff; box-shadow: var(--shadow); }
   .pdf-canvas { display: block; width: 100%; height: auto; }
+
+  /* Overlay layers */
   .ink-canvas { position: absolute; inset: 0; cursor: crosshair; touch-action: none; z-index: 1; }
   .text-layer {
-    position: absolute; inset: 0; z-index: 2; pointer-events: none;  /* enabled in JS for Text tool */
+    position: absolute; inset: 0; z-index: 2; pointer-events: none; /* enabled in JS for Text tool */
     user-select: text; -webkit-user-select: text; /* allow caret/selection */
   }
   .text-item {
-    position: absolute; min-width: 8px; outline: 1px dashed transparent;
+    position: absolute; min-width: 8px;
     white-space: pre-wrap; background: transparent; color: black;
     user-select: text; -webkit-user-select: text;
+    outline: none;                 /* no border when not editing */
   }
-  .text-item[contenteditable="true"] { outline-color: #8bb; background: #f7faff; }
+  .text-item:focus {
+    outline: 1px dashed #8bb;      /* show only while editing */
+    background: #f7faff;
+  }
 
   /* ---- Controls ---- */
   .tool-btn, .dropdown-btn {
@@ -50,17 +59,23 @@
   .palette { display: inline-flex; gap: 6px; align-items: center; }
   .swatch { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #ccc; cursor: pointer; box-sizing: border-box; }
   .swatch.selected { border-color: #000; outline: 2px solid #0003; }
+
   .sizes { position: relative; display: inline-block; }
   .size-menu { position: absolute; top: 100%; left: 0; margin-top: 4px; background: #fff; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.1); padding: 6px; display: none; z-index: 2000; }
   .size-menu.open { display: block; }
   .size-option { display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer; border-radius: 6px; }
   .size-option:hover { background: #f5f5f5; }
   .size-dot { width: 36px; height: 0; border-radius: 6px; background: currentColor; }
+
   .grow { flex: 1 1 auto; min-width: 24px; }
   .zoom-group { display: inline-flex; gap: 6px; align-items: center; }
   .zoom-label { min-width: 64px; text-align: center; }
+
+  /* Cursors for hand tool */
   .hand-grab     { cursor: grab !important; }
   .hand-grabbing { cursor: grabbing !important; }
+
+  /* Compact toolbar on small screens */
   @media (max-width: 480px) {
     .tool-btn span.txt { display: none; }
     .zoom-label { display: none; }
@@ -71,12 +86,21 @@
   <!-- ===== Toolbar (fixed) ===== -->
   <div id="toolbar">
     <input type="file" id="file" accept="application/pdf" />
-    <button id="tool-pen" class="tool-btn active" title="Draw (Apple Pencil / mouse)"><span class="icon">✏️</span><span class="txt">Draw</span></button>
-    <button id="tool-eraser" class="tool-btn" title="Erase strokes"><span class="icon">🧽</span><span class="txt">Eraser</span></button>
-    <button id="tool-hand" class="tool-btn" title="Move / pan / pinch‑zoom"><span class="icon">✋</span><span class="txt">Move</span></button>
-    <button id="tool-text" class="tool-btn" title="Text tool"><span class="icon">🅰️</span><span class="txt">Text</span></button>
 
-    <!-- Palette -->
+    <button id="tool-pen" class="tool-btn active" title="Draw (Apple Pencil / mouse)">
+      <span class="icon">✏️</span><span class="txt">Draw</span>
+    </button>
+    <button id="tool-eraser" class="tool-btn" title="Erase strokes">
+      <span class="icon">🧽</span><span class="txt">Eraser</span>
+    </button>
+    <button id="tool-hand" class="tool-btn" title="Move / pan / pinch‑zoom">
+      <span class="icon">✋</span><span class="txt">Move</span>
+    </button>
+    <button id="tool-text" class="tool-btn" title="Text tool">
+      <span class="icon">🅰️</span><span class="txt">Text</span>
+    </button>
+
+    <!-- 8‑color palette -->
     <div class="palette" aria-label="Color palette">
       <div class="swatch" data-color="#000000" style="background:#000000"></div>
       <div class="swatch" data-color="#D32F2F" style="background:#D32F2F"></div>
@@ -95,6 +119,7 @@
     </div>
 
     <div class="grow"></div>
+
     <!-- Zoom controls -->
     <div class="zoom-group">
       <button id="zoom-out" class="tool-btn" title="Zoom out"><span class="icon">➖</span></button>
@@ -104,7 +129,7 @@
     </div>
 
     <button id="undo" class="tool-btn" type="button" title="Undo on current page">Undo</button>
-    <button id="clear" class="tool-btn" type="button" title="Clear strokes & text on current page">Clear</button>
+    <button id="clear" class="tool-btn" type="button" title="Clear page">Clear</button>
     <button id="export" class="tool-btn" type="button" title="Export annotated PDF">Export</button>
   </div>
 
@@ -113,7 +138,7 @@
     <div id="content"><div id="pages"></div></div>
   </div>
 
-  <!-- PDF.js (worker disabled for file:// and maximum compatibility) -->
+  <!-- PDF.js (worker disabled for portability) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
   <!-- pdf-lib -->
   <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
@@ -215,6 +240,7 @@
         sizeMenu.appendChild(row);
       });
       sizeLabel.textContent = `Size: ${brushSize}`;
+      // Make the whole button clickable (icon+text)
       sizeBtn.addEventListener('click', (e)=>{ e.stopPropagation(); sizeMenu.classList.toggle('open'); });
       document.addEventListener('click', (e)=>{ if (!sizeMenu.contains(e.target) && !sizeBtn.contains(e.target)) sizeMenu.classList.remove('open'); });
     })();
@@ -237,11 +263,14 @@
         else { l.inkCanvas.classList.remove('hand-grab','hand-grabbing'); l.inkCanvas.style.cursor = 'crosshair'; }
       });
 
-      // IMPORTANT: allow taps to focus inputs when in text mode
+      // Allow taps to focus inputs when in text mode (helps iOS keyboard)
       viewport.style.touchAction = (tool === 'text') ? 'manipulation' : 'none';
 
       if (tool==='text') sizeLabel.textContent = `Text: ${textSize}px`;
       else sizeLabel.textContent = `Size: ${brushSize}`;
+
+      // notify listeners (text items update editability)
+      document.dispatchEvent(new Event('tool-change'));
     }
     toolPenBtn.addEventListener('click', ()=>setTool('pen'));
     toolEraserBtn.addEventListener('click', ()=>setTool('eraser'));
@@ -254,7 +283,9 @@
         const file = e.target.files?.[0]; if (!file) return;
         pdfBytesOriginal = await file.arrayBuffer();
         await loadPDF(pdfBytesOriginal);
-        setTimeout(centerAndFitToWidth, 50);
+
+        // Ensure layout is ready before fitting
+        setTimeout(centerAndFitToWidth, 60);
       } catch (err) { console.error(err); alert('Failed to load PDF. See console.'); }
     });
 
@@ -283,13 +314,15 @@
         setupPageInteractions(i-1);
         pagesEl.appendChild(wrap);
       }
+
+      // Size the transform container AFTER layout fully settles (prevents disappearing)
       requestAnimationFrame(() => {
-  requestAnimationFrame(() => {
-    const rect = pagesEl.getBoundingClientRect();
-    content.style.width = rect.width + 'px';
-    content.style.height = rect.height + 'px';
-  });
-});
+        requestAnimationFrame(() => {
+          content.style.width  = Math.max(pagesEl.scrollWidth,  pagesEl.getBoundingClientRect().width)  + 'px';
+          content.style.height = Math.max(pagesEl.scrollHeight, pagesEl.getBoundingClientRect().height) + 'px';
+        });
+      });
+
       setTool(currentTool);
     }
 
@@ -372,17 +405,44 @@
         const t = c1 / c2; const px = a.x + t*vx, py = a.y + t*vy; return Math.hypot(p.x-px, p.y-py);
       }
 
-      // ===== Text tool: place & edit =====
-      function placeTextAtClientXY(clientX, clientY){
+      // ===== Text tool helpers =====
+      function focusTextItem(el) {
+        el.contentEditable = (currentTool === 'text') ? 'true' : 'false';
+        if (currentTool !== 'text') return;
+        setTimeout(() => {
+          try {
+            el.focus({ preventScroll: true });
+            const r = document.createRange();
+            r.selectNodeContents(el);
+            r.collapse(false);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(r);
+          } catch {}
+        }, 0);
+      }
+
+      // Delegated click: edit existing or create a new text box
+      textLayer.addEventListener('click', (e) => {
+        if (currentTool !== 'text') return;
+
+        const targetItem = e.target.closest('.text-item');
+        if (targetItem) {
+          focusTextItem(targetItem);
+          e.preventDefault();
+          return;
+        }
+
+        // create new text item at click
         const rect = textLayer.getBoundingClientRect();
-        const x = (clientX - rect.left) * (inkCanvas.width  / rect.width);
-        const y = (clientY - rect.top)  * (inkCanvas.height / rect.height);
+        const x = (e.clientX - rect.left) * (inkCanvas.width  / rect.width);
+        const y = (e.clientY - rect.top)  * (inkCanvas.height / rect.height);
 
         const el = document.createElement('div');
         el.className = 'text-item';
         el.contentEditable = 'true';
         el.spellcheck = false;
-        el.setAttribute('tabindex','0');       // helps focusing on iOS
+        el.setAttribute('tabindex','0');
         el.style.left = `${x}px`;
         el.style.top  = `${y}px`;
         el.style.color = currentColor;
@@ -392,19 +452,11 @@
         el.textContent = '';
         textLayer.appendChild(el);
 
-        // Model item
+        // Model
         const item = { x, y, color: currentColor, size: textSize, value: '' };
         pageData[pageIndex].texts.push(item);
 
-        // Focus with a tiny delay (reliable on iOS)
-        setTimeout(() => {
-          try {
-            el.focus({ preventScroll: true });
-            // put caret at end
-            const r = document.createRange(); r.selectNodeContents(el); r.collapse(false);
-            const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
-          } catch {}
-        }, 0);
+        focusTextItem(el);
 
         function commit(){
           item.value = el.textContent || '';
@@ -422,26 +474,19 @@
         }
         el.addEventListener('blur', commit);
         el.addEventListener('keydown', onKey);
-        el.addEventListener('dblclick', () => { if (currentTool==='text') { el.contentEditable='true'; el.focus(); } });
-        document.addEventListener('tool-change', ()=>{ el.contentEditable = (currentTool==='text') ? 'true' : 'false'; });
-      }
+      });
 
-      // We accept both pointerdown and click (click is more consistent on iOS for showing keyboard)
-      textLayer.addEventListener('pointerdown', (e) => { if (currentTool==='text') { placeTextAtClientXY(e.clientX, e.clientY); e.preventDefault(); } });
-      textLayer.addEventListener('click',        (e) => { if (currentTool==='text') { placeTextAtClientXY(e.clientX, e.clientY); e.preventDefault(); } });
+      // Update editability when tools change
+      document.addEventListener('tool-change', () => {
+        textLayer.querySelectorAll('.text-item').forEach(el => {
+          el.contentEditable = (currentTool === 'text') ? 'true' : 'false';
+        });
+      });
 
       // Toolbar actions (current page)
       undoBtn.addEventListener('click', () => { if (pageData[pageIndex].strokes.length > 0) { pageData[pageIndex].strokes.pop(); redraw(); } });
       clearBtn.addEventListener('click', () => { pageData[pageIndex].strokes = []; pageData[pageIndex].texts = []; textLayer.innerHTML = ''; redraw(); });
     }
-
-    function broadcastToolChange(){ document.dispatchEvent(new Event('tool-change')); }
-    ;['click'].forEach(ev=>{
-      toolPenBtn.addEventListener(ev, broadcastToolChange);
-      toolEraserBtn.addEventListener(ev, broadcastToolChange);
-      toolHandBtn.addEventListener(ev, broadcastToolChange);
-      toolTextBtn.addEventListener(ev, broadcastToolChange);
-    });
 
     /************ Pan & Pinch‑Zoom on content (Move tool) ************/
     const activePointers = new Map();
@@ -494,9 +539,9 @@
     viewport.addEventListener('pointerleave', endPointer);
 
     // Zoom buttons
-    document.getElementById('zoom-in').addEventListener('click', () => zoomAt({x: viewport.clientWidth/2, y: viewport.clientHeight/2}, view.scale*1.2));
-    document.getElementById('zoom-out').addEventListener('click', () => zoomAt({x: viewport.clientWidth/2, y: viewport.clientHeight/2}, view.scale/1.2));
-    document.getElementById('zoom-reset').addEventListener('click', () => { centerAndFitToWidth(); });
+    zoomInBtn.addEventListener('click', () => zoomAt({x: viewport.clientWidth/2, y: viewport.clientHeight/2}, view.scale*1.2));
+    zoomOutBtn.addEventListener('click', () => zoomAt({x: viewport.clientWidth/2, y: viewport.clientHeight/2}, view.scale/1.2));
+    zoomResetBtn.addEventListener('click', () => { centerAndFitToWidth(); });
 
     /************ Export (vector strokes + text) ************/
     exportBtn.addEventListener('click', async () => {
