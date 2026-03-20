@@ -254,7 +254,7 @@
         const file = e.target.files?.[0]; if (!file) return;
         pdfBytesOriginal = await file.arrayBuffer();
         await loadPDF(pdfBytesOriginal);
-        centerAndFitToWidth();
+        setTimeout(centerAndFitToWidth, 50);
       } catch (err) { console.error(err); alert('Failed to load PDF. See console.'); }
     });
 
@@ -284,10 +284,12 @@
         pagesEl.appendChild(wrap);
       }
       requestAnimationFrame(() => {
-        const r = pagesEl.getBoundingClientRect();
-        content.style.width = r.width + 'px';
-        content.style.height = r.height + 'px';
-      });
+  requestAnimationFrame(() => {
+    const rect = pagesEl.getBoundingClientRect();
+    content.style.width = rect.width + 'px';
+    content.style.height = rect.height + 'px';
+  });
+});
       setTool(currentTool);
     }
 
